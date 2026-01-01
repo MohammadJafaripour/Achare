@@ -7,14 +7,19 @@ from django.db.models import Avg, Count
 from django.db.models.signals import post_save, post_delete
 from django.dispatch import receiver
 from django.utils import timezone
-
+from django.contrib.auth.models import AbstractUser
 # ----------------------
 # 1) User model
 # ----------------------
-class User(models.Model):
+
+from django.contrib.auth.base_user import BaseUserManager
+
+
+class User(AbstractUser):
     """
-    Model representing registered users.
-    Each user can have different roles: user, contractor, support, admin.
+    Custom user extending Django's AbstractUser so we have password management,
+    is_active, date_joined, etc. Username remains (can login via username),
+    email is made unique so we can locate by email as well.
     """
     ROLE_USER = "user"
     ROLE_CONTRACTOR = "contractor"
@@ -27,18 +32,20 @@ class User(models.Model):
         (ROLE_ADMIN, "Admin"),
     ]
 
-    first_name = models.CharField("first name", max_length=150, blank=True)
-    last_name = models.CharField("last name", max_length=150, blank=True)
-    email = models.EmailField("email", unique=True)
-    phone = models.CharField("phone", max_length=30, blank=True, null=True)
+    username = models.CharField(max_length=150, unique=True, null=True)
+    # override email to be unique
+    email = models.EmailField('email address', unique=True)
+    phone = models.CharField("phone", max_length=30, blank=True, null=True,unique=True)
     role = models.CharField("role", max_length=30, choices=ROLE_CHOICES, default=ROLE_USER)
 
-    # Optional aggregated fields (kept up-to-date via signals)
+
+
+    # aggregated fields (keep updated with signals from Review model)
     average_rating = models.FloatField("average rating", default=0.0)
     total_reviews = models.PositiveIntegerField("total reviews", default=0)
 
-    is_active = models.BooleanField("is active", default=True)
-    date_joined = models.DateTimeField("date joined", default=timezone.now)
+    # Note: AbstractUser already defines: username, first_name, last_name,
+    # password, is_active, date_joined, last_login, etc.
 
     class Meta:
         verbose_name = "user"
@@ -47,7 +54,6 @@ class User(models.Model):
     def __str__(self):
         name = f"{self.first_name} {self.last_name}".strip()
         return name or self.email
-
 # ----------------------
 # 2) Ad model
 # ----------------------
@@ -58,12 +64,16 @@ class Ad(models.Model):
     """
     STATUS_OPEN = "open"
     STATUS_REVIEWING = "review"
+    STATUS_DONE_BY_PERFORMER = "done but no acc yet"
     STATUS_DONE = "done"
+    STATUS_CANCELLED = "cancelled"
 
     STATUS_CHOICES = [
         (STATUS_OPEN, "Open"),
         (STATUS_REVIEWING, "Under Review"),
+        (STATUS_DONE_BY_PERFORMER , "done but no acc yet"),
         (STATUS_DONE, "Done"),
+        (STATUS_CANCELLED , "Cancelled"),
     ]
 
     title = models.CharField("title", max_length=250)
@@ -102,8 +112,16 @@ class Ad(models.Model):
             self.location = location
         self.save(update_fields=["performer", "status", "execution_time", "location", "updated_at"])
 
+    def mark_performer_done(self):
+        self.status = self.STATUS_DONE_BY_PERFORMER
+        self.save(update_fields=["status", "updated_at"])
+
     def mark_done(self):
         self.status = self.STATUS_DONE
+        self.save(update_fields=["status", "updated_at"])
+
+    def cancel(self):
+        self.status = self.STATUS_CANCELLED
         self.save(update_fields=["status", "updated_at"])
 
     def __str__(self):

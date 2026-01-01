@@ -117,6 +117,9 @@ USE_TZ = True
 
 STATIC_URL = 'static/'
 
+AUTH_USER_MODEL = "main.User"   
+
+
 
 INSTALLED_APPS += ["rest_framework", "rest_framework.authtoken", "drf_spectacular",]
 
@@ -138,5 +141,17 @@ SPECTACULAR_SETTINGS = {
     "VERSION": "1.0.0",
     "SERVE_INCLUDE_SCHEMA": False,  # keep schema-only endpoint separate
     # You can add more spectacular options here (AUTHENTICATION, SCHEMA_PATH_PREFIX, etc.)
+    "COMPONENTS": {
+        "securitySchemes": {
+            "TokenAuth": {                # name shown in Swagger Authorize dialog
+                "type": "apiKey",
+                "in": "header",
+                "name": "Authorization",
+                "description": "Token authentication. Example: `Token <your_token>`"
+            }
+        }
+    },
+    # apply globally so operations in swagger show the lock icon / require auth
+    "SECURITY": [{"TokenAuth": []}],
 }
 

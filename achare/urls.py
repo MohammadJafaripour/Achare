@@ -1,10 +1,24 @@
 # urls.py
-from django.urls import path
+from django.urls import path, include
+from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView, SpectacularRedocView
+
 from main import views
+from django.contrib import admin
 
 
 
 urlpatterns = [
+
+    # project-level urls.py (or app urls to include)
+    # admin
+    # 1234
+    path('admin/', admin.site.urls),
+    # ... your other includes
+    path("api/schema/", SpectacularAPIView.as_view(), name="schema"),                    # JSON schema
+    path("api/schema/swagger-ui/", SpectacularSwaggerView.as_view(url_name="schema"), name="swagger-ui"),  # Swagger UI
+    path("api/schema/redoc/", SpectacularRedocView.as_view(url_name="schema"), name="redoc"),              # Redoc (optional)
+
+
     # Auth
     path("auth/register/", views.RegisterAPIView.as_view(), name="auth-register"),                # POST
     path("auth/login/", views.LoginAPIView.as_view(), name="auth-login"),                         # POST
@@ -12,8 +26,8 @@ urlpatterns = [
 
     # Ads (list/create + detail + assignment/status)
     path("ads/", views.AdListCreateAPIView.as_view(), name="ads-list-create"),                    # GET, POST
-    path("ads/<int:pk>/", views.AdDetailAPIView.as_view(), name="ads-detail"),                    # GET, PUT, DELETE
-    path("ads/<int:pk>/assign/", views.AdAssignAPIView.as_view(), name="ads-assign"),             # POST
+    path("ads/<int:ad_pk>/", views.AdDetailAPIView.as_view(), name="ads-detail"),                    # GET, PUT, DELETE
+    #path("ads/<int:pk>/assign/", views.AdAssignAPIView.as_view(), name="ads-assign"),             # POST
     path("ads/<int:ad_pk>/performer-mark-done/", views.AdPerformerMarkDoneAPIView.as_view(), name="ads-performer-mark-done"),  # POST
     path("ads/<int:ad_pk>/creator-confirm-done/", views.AdCreatorConfirmDoneAPIView.as_view(), name="ads-creator-confirm-done"),# POST
     path("ads/<int:ad_pk>/cancel/", views.AdCancelAPIView.as_view(), name="ads-cancel"),          # POST

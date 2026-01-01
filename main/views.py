@@ -7,6 +7,8 @@ from rest_framework.authtoken.models import Token
 from django.contrib.auth import get_user_model
 from django.shortcuts import get_object_or_404
 from django.db.models import Count, Q, Avg, F
+from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiExample
+from drf_spectacular.types import OpenApiTypes
 
 from .serializers import (
     UserSerializer,
@@ -25,10 +27,57 @@ from .permissions import (
 )
 
 User = get_user_model()
+# at the top of views.py add:
+from drf_spectacular.utils import extend_schema, OpenApiExample
 
 # --------------------------
 # Auth: registration & login
 # --------------------------
+@extend_schema(
+    request={
+        "application/json": {
+            "type": "object",
+            "properties": {
+                "username": {"type": "string"},
+                "first_name": {"type": "string"},
+                "last_name": {"type": "string"},
+                "email": {"type": "string"},
+                "phone": {"type": "string"},
+                "password": {"type": "string"},
+                "role": {"type": "string", "description": "optional (admin only can set different roles)"}
+            },
+            "example": {
+                "username": "AliRezaei",
+                "first_name": "Ali",
+                "last_name": "Rezaei",
+                "email": "ali@example.com",
+                "phone": "+1234567890",
+                "password": "P@ssw0rd",
+                "role": "user",
+            }
+        }
+    },
+    examples=[
+        OpenApiExample(
+            "Register response example",
+            value={
+                "id": 1,
+                "username": "AliRezaei",
+                "first_name": "Ali",
+                "last_name": "Rezaei",
+                "email": "ali@example.com",
+                "phone": "+1234567890",
+                "role": "user",
+                "date_joined": "2026-01-01T12:00:00Z",
+                "average_rating": 0.0,
+                "total_reviews": 0,
+                "token": "abcd1234-token-example"
+            },
+            response_only=True,
+            status_codes=["201"]
+        )
+    ],
+)
 class RegisterAPIView(APIView):
     permission_classes = [AllowAny]
 
@@ -45,6 +94,44 @@ class RegisterAPIView(APIView):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
+@extend_schema(
+    request={
+        "application/json": {
+            "type": "object",
+            "properties": {
+                "identifier": {"type": "string", "description": "username or email or phone"},
+                "password": {"type": "string"}
+            },
+            "example": {"identifier": "ali@example.com", "password": "P@ssw0rd"}
+        }
+    },
+    examples=[
+        OpenApiExample(
+            "Login success example",
+            value={
+                "id": 1,
+                "username": "AliRezaei",
+                "first_name": "Ali",
+                "last_name": "Rezaei",
+                "email": "ali@example.com",
+                "phone": "+1234567890",
+                "role": "user",
+                "date_joined": "2026-01-01T12:00:00Z",
+                "average_rating": 0.0,
+                "total_reviews": 0,
+                "token": "abcd1234-token-example"
+            },
+            response_only=True,
+            status_codes=["200"]
+        ),
+        OpenApiExample(
+            "Login error example",
+            value={"detail": "Invalid credentials."},
+            response_only=True,
+            status_codes=["400"]
+        )
+    ]
+)
 class LoginAPIView(APIView):
     permission_classes = [AllowAny]
 
@@ -54,7 +141,6 @@ class LoginAPIView(APIView):
         if not identifier or not password:
             return Response({"detail": "Provide identifier and password."}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Try email, phone, username (in that order)
         user = User.objects.filter(email__iexact=identifier).first()
         if not user:
             user = User.objects.filter(phone__iexact=identifier).first()
@@ -73,6 +159,49 @@ class LoginAPIView(APIView):
 # --------------------------
 # User detail / update (self)
 # --------------------------
+@extend_schema(
+    request={
+        "application/json": {
+            "type": "object",
+            "properties": {
+                "username": {"type": "string"},
+                "first_name": {"type": "string"},
+                "last_name": {"type": "string"},
+                "email": {"type": "string"},
+                "phone": {"type": "string"},
+                "password": {"type": "string"},
+                "role": {"type": "string", "description": "optional (admin only can set different roles)"}
+            },
+            "example": {
+                "username": "AliRezaei",
+                "first_name": "Alimmd",
+                "last_name": "Rezaei",
+                "email": "ali@example.com",
+                "phone": "+1234567890",
+                "password": "P@ssw0rd"
+            }
+        }
+    },
+    responses=[
+        OpenApiExample(
+            "Current user example (GET /auth/me/)",
+            value={
+                "id": 1,
+                "username": "AliRezaei",
+                "first_name": "Ali",
+                "last_name": "Rezaei",
+                "email": "ali@example.com",
+                "phone": "+1234567890",
+                "role": "user",
+                "date_joined": "2026-01-01T12:00:00Z",
+                "average_rating": 4.6,
+                "total_reviews": 12
+            },
+            response_only=True,
+            status_codes=["200"]
+        )
+    ]
+)
 class UserDetailAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -81,7 +210,6 @@ class UserDetailAPIView(APIView):
 
     def put(self, request):
         data = request.data.copy()
-        # prevent non-admin role changes
         if 'role' in data and not (request.user.is_superuser or getattr(request.user, "role", "") == "admin"):
             data.pop('role')
         serializer = UserSerializer(request.user, data=data, partial=True)
@@ -94,12 +222,53 @@ class UserDetailAPIView(APIView):
 # --------------------------
 # Ads: list/create/retrieve/update/delete
 # --------------------------
+@extend_schema(
+    request={
+        "application/json": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string"},
+                "description": {"type": "string"},
+                "category": {"type": "string"},
+                "execution_time": {"type": "string", "format": "date-time"},
+                "location": {"type": "string"}
+            },
+            "example": {
+                "title": "Fix leaking sink",
+                "description": "Kitchen sink leaking, needs repair",
+                "category": "plumbing",
+                "execution_time": "2026-02-10T09:00:00Z",
+                "location": "123 Main St"
+            }
+        }
+    },
+    examples=[
+        OpenApiExample(
+            "Create Ad response example",
+            value={
+                "id": 42,
+                "title": "Fix leaking sink",
+                "description": "Kitchen sink leaking, needs repair",
+                "category": "plumbing",
+                "status": "open",
+                "creator": 5,
+                "performer": None,
+                "performer_marked_done": False,
+                "execution_time": "2026-02-10T09:00:00Z",
+                "location": "123 Main St",
+                "created_at": "2026-01-05T10:00:00Z",
+                "updated_at": "2026-01-05T10:00:00Z"
+            },
+            response_only=True,
+            status_codes=["201"]
+        )
+    ]
+)
 class AdListCreateAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
         qs = Ad.objects.all().order_by("-created_at")
-        # hide cancelled ads from normal users
         if not (request.user.is_superuser or getattr(request.user, "role", "") in ("admin", "support")):
             qs = qs.exclude(status=Ad.STATUS_CANCELLED)
         return Response(AdSerializer(qs, many=True).data)
@@ -112,6 +281,29 @@ class AdListCreateAPIView(APIView):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
+@extend_schema(
+    responses=[
+        OpenApiExample(
+            "Ad detail response example",
+            value={
+                "id": 42,
+                "title": "Fix leaking sink",
+                "description": "Kitchen sink leaking, needs repair",
+                "category": "plumbing",
+                "status": "open",
+                "creator": 5,
+                "performer": None,
+                "performer_marked_done": False,
+                "execution_time": "2026-02-10T09:00:00Z",
+                "location": "123 Main St",
+                "created_at": "2026-01-05T10:00:00Z",
+                "updated_at": "2026-01-05T10:00:00Z"
+            },
+            response_only=True,
+            status_codes=["200"]
+        )
+    ]
+)
 class AdDetailAPIView(APIView):
     permission_classes = [IsAuthenticated, AdPermission]
 
@@ -145,6 +337,36 @@ class AdDetailAPIView(APIView):
 # --------------------------
 # Assignment & status transitions
 # --------------------------
+@extend_schema(
+    request={
+        "application/json": {
+            "type": "object",
+            "properties": {
+                "performer_id": {"type": "integer"},
+                "execution_time": {"type": "string", "format": "date-time"},
+                "location": {"type": "string"}
+            },
+            "example": {"performer_id": 10, "execution_time": "2026-02-10T09:00:00Z", "location": "123 Main St"}
+        }
+    },
+    examples=[
+        OpenApiExample(
+            "Assign ad response example",
+            value={
+                "id": 42,
+                "title": "Fix leaking sink",
+                "status": "assigned",
+                "creator": 5,
+                "performer": 10,
+                "execution_time": "2026-02-10T09:00:00Z",
+                "location": "123 Main St",
+                "performer_marked_done": False
+            },
+            response_only=True,
+            status_codes=["200"]
+        )
+    ]
+)
 class AdAssignAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -165,6 +387,16 @@ class AdAssignAPIView(APIView):
         return Response(AdSerializer(ad).data)
 
 
+@extend_schema(
+    responses=[
+        OpenApiExample(
+            "Performer mark done response example",
+            value={"detail": "Performer marked task as completed. Customer must confirm."},
+            response_only=True,
+            status_codes=["200"]
+        )
+    ]
+)
 class AdPerformerMarkDoneAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -172,12 +404,26 @@ class AdPerformerMarkDoneAPIView(APIView):
         ad = get_object_or_404(Ad, pk=ad_pk)
         if not ad.performer or ad.performer.pk != request.user.pk:
             return Response({"detail": "Only assigned performer can mark done."}, status=status.HTTP_403_FORBIDDEN)
-        if ad.status != Ad.STATUS_ASSIGNED:
+        if ad.status != Ad.STATUS_REVIEWING:
             return Response({"detail": "Ad must be ASSIGNED to mark completion."}, status=status.HTTP_400_BAD_REQUEST)
         ad.mark_performer_done()
         return Response(AdSerializer(ad).data)
 
 
+@extend_schema(
+    responses=[
+        OpenApiExample(
+            "Creator confirm done response example",
+            value={
+                "id": 42,
+                "status": "done",
+                "performer_marked_done": False
+            },
+            response_only=True,
+            status_codes=["200"]
+        )
+    ]
+)
 class AdCreatorConfirmDoneAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -189,12 +435,22 @@ class AdCreatorConfirmDoneAPIView(APIView):
             return Response({"detail": "Ad already marked done."}, status=status.HTTP_400_BAD_REQUEST)
         if not ad.performer:
             return Response({"detail": "Ad has no assigned performer."}, status=status.HTTP_400_BAD_REQUEST)
-        if not ad.performer_marked_done:
+        if not ad.mark_performer_done:
             return Response({"detail": "Performer has not declared completion yet."}, status=status.HTTP_400_BAD_REQUEST)
-        ad.confirm_done()
+        ad.mark_done()
         return Response(AdSerializer(ad).data)
 
 
+@extend_schema(
+    responses=[
+        OpenApiExample(
+            "Cancel ad response example",
+            value={"id": 42, "status": "cancelled"},
+            response_only=True,
+            status_codes=["200"]
+        )
+    ]
+)
 class AdCancelAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -212,6 +468,35 @@ class AdCancelAPIView(APIView):
 # --------------------------
 # JobRequest endpoints (apply / cancel / delete / list applicants)
 # --------------------------
+@extend_schema(
+    request={
+        "application/json": {
+            "type": "object",
+            "properties": {
+                "ad": {"type": "integer"},
+                "message": {"type": "string"},
+                "proposed_price": {"type": "string"}
+            },
+            "example": {"ad": 42, "message": "I can do this next week", "proposed_price": "150.00"}
+        }
+    },
+    examples=[
+        OpenApiExample(
+            "JobRequest response example",
+            value={
+                "id": 101,
+                "ad": 42,
+                "contractor": 10,
+                "message": "I can do this next week",
+                "proposed_price": "150.00",
+                "status": "pending",
+                "created_at": "2026-01-10T12:00:00Z"
+            },
+            response_only=True,
+            status_codes=["201"]
+        )
+    ]
+)
 class JobRequestCreateAPIView(APIView):
     permission_classes = [IsAuthenticated, IsContractor]
 
@@ -223,6 +508,16 @@ class JobRequestCreateAPIView(APIView):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
+@extend_schema(
+    responses=[
+        OpenApiExample(
+            "JobRequest cancel response example",
+            value={"id": 101, "status": "cancelled"},
+            response_only=True,
+            status_codes=["200"]
+        )
+    ]
+)
 class JobRequestCancelAPIView(APIView):
     permission_classes = [IsAuthenticated, IsJobRequestOwnerOrAdmin]
 
@@ -245,6 +540,26 @@ class JobRequestDeleteAPIView(APIView):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
+@extend_schema(
+    responses=[
+        OpenApiExample(
+            "Applicants list example",
+            value=[
+                {
+                    "id": 101,
+                    "ad": 42,
+                    "contractor": 10,
+                    "message": "I can do this next week",
+                    "proposed_price": "150.00",
+                    "status": "pending",
+                    "created_at": "2026-01-10T12:00:00Z"
+                }
+            ],
+            response_only=True,
+            status_codes=["200"]
+        )
+    ]
+)
 class AdApplicantsListAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -256,6 +571,33 @@ class AdApplicantsListAPIView(APIView):
         return Response(JobRequestSerializer(qs, many=True).data)
 
 
+@extend_schema(
+    request={
+        "application/json": {
+            "type": "object",
+            "properties": {
+                "performer_id": {"type": "integer"},
+                "execution_time": {"type": "string", "format": "date-time"},
+                "location": {"type": "string"}
+            },
+            "example": {"performer_id": 10, "execution_time": "2026-02-12T09:00:00Z", "location": "123 Main St"}
+        }
+    },
+    examples=[
+        OpenApiExample(
+            "Accept applicant response example",
+            value={
+                "id": 42,
+                "status": "assigned",
+                "performer": 10,
+                "execution_time": "2026-02-12T09:00:00Z",
+                "location": "123 Main St"
+            },
+            response_only=True,
+            status_codes=["200"]
+        )
+    ]
+)
 class AdAcceptApplicantAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -276,10 +618,29 @@ class AdAcceptApplicantAPIView(APIView):
         JobRequest.objects.filter(ad=ad).exclude(pk=jr.pk).update(status=JobRequest.STATUS_REJECTED)
         return Response(AdSerializer(ad).data)
 
-
 # --------------------------
 # Reviews: create + detail (get/put/delete)
 # --------------------------
+@extend_schema(
+    request=ReviewCreateSerializer,
+    responses={
+        201: ReviewReadSerializer,
+        400: OpenApiExample("Invalid data", value={"detail": "error message"}, response_only=True)
+    },
+    examples=[
+        OpenApiExample(
+            "Create review request example",
+            value={"ad": 42, "performer": 10, "text": "Great job!", "rating": 5},
+            request_only=True,
+        ),
+        OpenApiExample(
+            "Create review response example",
+            value={"id": 11, "author": {"id": 7, "name": "Ali"}, "text": "Great job!", "rating": 5, "created_at": "2026-01-10T12:00:00Z"},
+            response_only=True,
+            status_codes=["201"]
+        )
+    ],
+)
 class ReviewCreateAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -294,6 +655,21 @@ class ReviewCreateAPIView(APIView):
         return Response(ReviewReadSerializer(review).data, status=status.HTTP_201_CREATED)
 
 
+@extend_schema(
+    responses={
+        200: ReviewSerializer,
+        204: OpenApiExample("Deleted", value=None, response_only=True),
+        403: OpenApiExample("Forbidden", value={"detail": "Not allowed"}, response_only=True)
+    },
+    examples=[
+        OpenApiExample(
+            "Review detail example (GET/PUT)",
+            value={"id": 11, "ad": 42, "author": 7, "performer": 10, "text": "Great job!", "rating": 5, "created_at": "2026-01-10T12:00:00Z", "updated_at": "2026-01-10T12:00:00Z"},
+            response_only=True,
+            status_codes=["200"]
+        )
+    ],
+)
 class ReviewDetailAPIView(APIView):
     permission_classes = [IsAuthenticated, IsOwnerOrAdmin]
 
@@ -320,6 +696,26 @@ class ReviewDetailAPIView(APIView):
 # --------------------------
 # Tickets: list/create/detail/update/delete + reply by support
 # --------------------------
+@extend_schema(
+    request=TicketCreateSerializer,
+    responses={
+        201: TicketSerializer,
+        400: OpenApiExample("Bad request", value={"detail": "error"}, response_only=True)
+    },
+    examples=[
+        OpenApiExample(
+            "Create ticket request example",
+            value={"ad": 42, "subject": "Problem with job", "messages": [{"author_id": 7, "text": "Initial message", "created_at": "2026-01-10T12:00:00Z"}]},
+            request_only=True
+        ),
+        OpenApiExample(
+            "Create ticket response example",
+            value={"id": 55, "creator": 7, "ad": 42, "subject": "Problem with job", "messages": [{"author_id": 7, "text": "Initial message", "created_at": "2026-01-10T12:00:00Z"}], "status": "open", "created_at": "2026-01-10T12:00:00Z"},
+            response_only=True,
+            status_codes=["201"]
+        )
+    ],
+)
 class TicketListCreateAPIView(APIView):
     permission_classes = [TicketPermission]
 
@@ -338,6 +734,21 @@ class TicketListCreateAPIView(APIView):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
+@extend_schema(
+    responses={
+        200: TicketSerializer,
+        204: OpenApiExample("Deleted", value=None, response_only=True),
+        403: OpenApiExample("Forbidden", value={"detail": "Not allowed"}, response_only=True)
+    },
+    examples=[
+        OpenApiExample(
+            "Ticket detail example",
+            value={"id": 55, "creator": 7, "ad": 42, "subject": "Problem with job", "messages": [{"author_id":7,"text":"Initial message","created_at":"2026-01-10T12:00:00Z"}], "status": "open", "created_at": "2026-01-10T12:00:00Z"},
+            response_only=True,
+            status_codes=["200"]
+        )
+    ],
+)
 class TicketDetailAPIView(APIView):
     permission_classes = [TicketPermission]
 
@@ -362,6 +773,10 @@ class TicketDetailAPIView(APIView):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
+@extend_schema(
+    request={"application/json": {"type": "object", "properties": {"text": {"type": "string"}}, "example": {"text": "We scheduled a contractor"}}},
+    responses={200: OpenApiExample("Reply OK", value={"detail": "Reply added."}, response_only=True)}
+)
 class TicketReplyAPIView(APIView):
     permission_classes = [IsAuthenticated, IsSupportOrAdmin]
 
@@ -377,6 +792,58 @@ class TicketReplyAPIView(APIView):
 # --------------------------
 # Contractor list & profiles & filters
 # --------------------------
+@extend_schema(
+    parameters=[
+        OpenApiParameter(
+            name="min_rating",
+            type=OpenApiTypes.FLOAT,
+            description="Filter contractors with average rating >= this value (e.g. 3.5).",
+            required=False,
+            location=OpenApiParameter.QUERY
+        ),
+        OpenApiParameter(
+            name="min_reviews",
+            type=OpenApiTypes.INT,
+            description="Filter contractors with total reviews >= this integer (e.g. 5).",
+            required=False,
+            location=OpenApiParameter.QUERY
+        ),
+        OpenApiParameter(
+            name="order_by",
+            type=OpenApiTypes.STR,
+            description="Order results. Options: rating_desc, rating_asc, reviews_desc, reviews_asc, rating_reviews_desc (default).",
+            required=False,
+            location=OpenApiParameter.QUERY
+        ),
+    ],
+    responses={200: ContractorListItemSerializer(many=True)},
+    examples=[
+        OpenApiExample(
+            "Query example (min_rating + order_by)",
+            value=None,
+            summary="Example request: /contractors/?min_rating=4.0&order_by=rating_desc",
+            request_only=True
+        ),
+        OpenApiExample(
+            "Response example (contractor list item)",
+            value=[
+                {
+                    "id": 10,
+                    "first_name": "Ahmad",
+                    "last_name": "Saeed",
+                    "email": "a@example.com",
+                    "phone": "+123",
+                    "role": "contractor",
+                    "completed_count": 5,
+                    "average_rating": 4.5,
+                    "total_reviews": 10
+                }
+            ],
+            response_only=True,
+            status_codes=["200"]
+        )
+    ],
+)
 class ContractorListAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -431,6 +898,30 @@ class ContractorListAPIView(APIView):
         return Response(result)
 
 
+@extend_schema(
+    responses={200: ContractorProfileSerializer},
+    examples=[
+        OpenApiExample(
+            "Contractor profile example",
+            value={
+                "id": 10,
+                "first_name": "Ahmad",
+                "last_name": "Saeed",
+                "email": "a@example.com",
+                "phone": "+123",
+                "role": "contractor",
+                "completed_count": 5,
+                "average_rating": 4.5,
+                "total_reviews": 10,
+                "reviews": [
+                    {"id": 1, "author_id": 7, "author_name": "Ali", "text": "Great!", "rating": 5, "created_at": "2026-01-10T12:00:00Z"}
+                ]
+            },
+            response_only=True,
+            status_codes=["200"]
+        )
+    ],
+)
 class ContractorProfileAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -449,6 +940,27 @@ class ContractorProfileAPIView(APIView):
         return Response(ContractorProfileSerializer(contractor).data)
 
 
+@extend_schema(
+    responses={200: CustomerProfileSerializer},
+    examples=[
+        OpenApiExample(
+            "Customer profile example",
+            value={
+                "id": 7,
+                "first_name": "Sara",
+                "last_name": "Ahmadi",
+                "email": "sara@example.com",
+                "phone": "+987",
+                "role": "user",
+                "ads": [
+                    {"id": 42, "title": "Fix leaking sink", "status": "done", "execution_time": "2026-02-10T09:00:00Z", "location": "123 Main St", "created_at": "2026-01-05T10:00:00Z"}
+                ]
+            },
+            response_only=True,
+            status_codes=["200"]
+        )
+    ],
+)
 class CustomerProfileAPIView(APIView):
     permission_classes = [IsAuthenticated]
 

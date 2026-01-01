@@ -4,8 +4,8 @@ from django.contrib.auth import get_user_model
 from django.utils import timezone
 from .models import Ad, Review, Ticket, JobRequest
 
-User = get_user_model()
 
+User = get_user_model()
 
 # --------------------
 # User
@@ -16,7 +16,7 @@ class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
         fields = [
-            "id", "first_name", "last_name", "email", "phone", "role",
+            "id", "username", "first_name", "last_name", "email", "phone", "role",
             "password", "date_joined", "average_rating", "total_reviews"
         ]
         read_only_fields = ["date_joined", "average_rating", "total_reviews"]
@@ -59,7 +59,7 @@ class AdSerializer(serializers.ModelSerializer):
         model = Ad
         fields = [
             "id", "title", "description", "category", "status",
-            "creator", "performer", "performer_marked_done",
+            "creator", "performer", #"performer_marked_done",
             "execution_time", "location", "created_at", "updated_at"
         ]
         read_only_fields = [
@@ -201,7 +201,7 @@ class AdBriefSerializer(serializers.ModelSerializer):
 
 
 class CustomerProfileSerializer(serializers.ModelSerializer):
-    ads = AdBriefSerializer(many=True, source="ads")  # creator.related_name == "ads"
+    ads = AdBriefSerializer(many=True)  # creator.related_name == "ads"
 
     class Meta:
         model = User
