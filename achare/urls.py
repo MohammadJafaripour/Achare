@@ -56,4 +56,20 @@ urlpatterns = [
 
     # Customer profile
     path("profiles/customer/<int:user_pk>/", views.CustomerProfileAPIView.as_view(), name="customer-profile"), # GET
+
+
+    # Exteras
+    path("contractors/<int:contractor_pk>/reviews/", views.ContractorReviewsAPIView.as_view(), name="contractor-reviews"),
+
+    path("groups/", views.GroupCreateAPIView.as_view(), name="group-create"),
+    path("users/<int:user_pk>/groups/", views.UserGroupsAPIView.as_view(), name="user-groups"),
+    path("users/<int:user_pk>/groups/<str:group_name>/", views.UserGroupRemoveAPIView.as_view(), name="user-group-remove"),
+
+
+
+    path("ads/<int:ad_pk>/schedule/", views.AdScheduleAPIView.as_view(), name="ad-schedule"),
+    path("schedules/day/", views.ContractorDayScheduleAPIView.as_view(), name="contractor-day-schedule"),
+
+
+
 ]

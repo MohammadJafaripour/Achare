@@ -7,6 +7,8 @@ from django.contrib.auth.forms import ReadOnlyPasswordHashField
 from django.utils.translation import gettext_lazy as _
 from django.utils import timezone
 
+from django.db.models import Count, Q, Avg, F
+
 from .models import Ad, Review, Ticket, JobRequest
 
 User = get_user_model()
@@ -25,7 +27,7 @@ class CustomUserCreationForm(forms.ModelForm):
 
     class Meta:
         model = User
-        fields = ("email", "first_name", "last_name", "phone", "role")
+        fields = ("email","username", "first_name", "last_name", "phone", "role")
 
     def clean_password2(self):
         password1 = self.cleaned_data.get("password1")

@@ -9,6 +9,9 @@ from django.shortcuts import get_object_or_404
 from django.db.models import Count, Q, Avg, F
 from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiExample
 from drf_spectacular.types import OpenApiTypes
+from django.contrib.auth.models import Group
+from django.db import transaction
+from django.utils import timezone
 
 from .serializers import (
     UserSerializer,
@@ -17,9 +20,9 @@ from .serializers import (
     TicketSerializer, TicketCreateSerializer,
     JobRequestSerializer, JobRequestSerializer as JRSerializer,
     CustomerProfileSerializer, ContractorProfileSerializer,
-    ContractorListItemSerializer
+    ContractorListItemSerializer, AdScheduleSerializer
 )
-from .models import Ad, Review, Ticket, JobRequest
+from .models import Ad, Review, Ticket, JobRequest, AdSchedule
 from .permissions import (
     AdPermission, TicketPermission, IsOwnerOrAdmin, IsAdminUserRole, IsContractor,
     IsCreatorOrAdmin, IsSupportOrAdmin, IsTicketReplyAllowed, IsJobRequestOwnerOrAdmin,
@@ -967,3 +970,165 @@ class CustomerProfileAPIView(APIView):
     def get(self, request, user_pk):
         user = get_object_or_404(User, pk=user_pk)
         return Response(CustomerProfileSerializer(user).data)
+
+@extend_schema(
+    parameters=[
+        OpenApiParameter("rating", OpenApiTypes.INT, description="Exact rating filter (1..5)", required=False, location=OpenApiParameter.QUERY),
+        OpenApiParameter("min_rating", OpenApiTypes.INT, description="Minimum rating", required=False, location=OpenApiParameter.QUERY),
+        OpenApiParameter("max_rating", OpenApiTypes.INT, description="Maximum rating", required=False, location=OpenApiParameter.QUERY),
+    ],
+    responses={200: ReviewReadSerializer(many=True)},
+    examples=[
+        OpenApiExample(
+            "Filter reviews example",
+            value=[
+                {"id": 3, "author": {"id": 7, "name": "Ali"}, "text": "Great", "rating": 5, "created_at": "2026-01-10T12:00:00Z"}
+            ],
+            response_only=True,
+        )
+    ],
+)
+class ContractorReviewsAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, contractor_pk):
+        # ensure contractor exists
+        contractor = get_object_or_404(User, pk=contractor_pk, role="contractor")
+        qs = Review.objects.filter(performer=contractor).order_by("-created_at")
+        # query params
+        rating = request.query_params.get("rating")
+        min_rating = request.query_params.get("min_rating")
+        max_rating = request.query_params.get("max_rating")
+        try:
+            if rating is not None:
+                r = int(rating)
+                qs = qs.filter(rating=r)
+            if min_rating is not None:
+                qs = qs.filter(rating__gte=int(min_rating))
+            if max_rating is not None:
+                qs = qs.filter(rating__lte=int(max_rating))
+        except ValueError:
+            return Response({"detail": "Invalid rating value"}, status=status.HTTP_400_BAD_REQUEST)
+
+        data = ReviewReadSerializer(qs, many=True).data
+        return Response(data)
+
+
+def is_admin_user(user):
+    return user.is_superuser or getattr(user, "role", "") == "admin"
+
+@extend_schema(
+    request={"application/json": {"type": "object", "properties": {"name": {"type": "string"}}, "example": {"name": "hackers"}}},
+    responses={201: OpenApiExample("group created", value={"name":"support"}, response_only=True)}
+)
+class GroupCreateAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        if not is_admin_user(request.user):
+            return Response({"detail":"Only admin can create groups."}, status=status.HTTP_403_FORBIDDEN)
+        name = request.data.get("name")
+        if not name:
+            return Response({"detail":"name required"}, status=status.HTTP_400_BAD_REQUEST)
+        group, created = Group.objects.get_or_create(name=name)
+        return Response({"name": group.name}, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
+
+
+@extend_schema(
+    request={"application/json": {"type": "object", "properties": {"group": {"type": "string"}}, "example": {"group": "hackers"}}},
+    responses={200: OpenApiExample("user groups list", value=["support","contractor"], response_only=True)}
+)
+class UserGroupsAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, user_pk):
+        user = get_object_or_404(User, pk=user_pk)
+        names = list(user.groups.values_list("name", flat=True))
+        return Response(names)
+
+    def post(self, request, user_pk):
+        # add a group to user
+        if not is_admin_user(request.user):
+            return Response({"detail":"Only admin can modify user groups."}, status=status.HTTP_403_FORBIDDEN)
+        user = get_object_or_404(User, pk=user_pk)
+        name = request.data.get("group")
+        if not name:
+            return Response({"detail":"group name required"}, status=status.HTTP_400_BAD_REQUEST)
+        group = Group.objects.filter(name=name).first()
+        if not group:
+            return Response({"detail":"group not found"}, status=status.HTTP_404_NOT_FOUND)
+        user.groups.add(group)
+        return Response({"detail": f"group {name} added to user {user.pk}."})
+
+
+class UserGroupRemoveAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def delete(self, request, user_pk, group_name):
+        if not is_admin_user(request.user):
+            return Response({"detail":"Only admin can modify user groups."}, status=status.HTTP_403_FORBIDDEN)
+        user = get_object_or_404(User, pk=user_pk)
+        group = Group.objects.filter(name=group_name).first()
+        if not group:
+            return Response({"detail":"group not found"}, status=status.HTTP_404_NOT_FOUND)
+        user.groups.remove(group)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+@extend_schema(
+    request=AdScheduleSerializer,
+    responses={201: AdScheduleSerializer},
+    examples=[OpenApiExample("Schedule example", value={"ad":42, "start_time":"2026-02-12T09:00:00Z","end_time":"2026-02-12T11:00:00Z","location":"123 Main St"}, request_only=True)]
+)
+class AdScheduleAPIView(APIView):
+    permission_classes = [IsAuthenticated, IsContractor]
+
+    def post(self, request, ad_pk):
+        ad = get_object_or_404(Ad, pk=ad_pk)
+        # only assigned performer (contractor) can set schedule
+        if not ad.performer or ad.performer.pk != request.user.pk:
+            return Response({"detail":"Only assigned performer can set schedule."}, status=status.HTTP_403_FORBIDDEN)
+
+        data = request.data.copy()
+        data["ad"] = ad.pk
+        serializer = AdScheduleSerializer(data=data, context={"request": request})
+        if serializer.is_valid():
+            schedule = serializer.save()
+            return Response(AdScheduleSerializer(schedule).data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    def get(self, request, ad_pk):
+        # get schedule for the ad
+        ad = get_object_or_404(Ad, pk=ad_pk)
+        schedule = getattr(ad, "schedule", None)
+        if not schedule:
+            return Response({}, status=status.HTTP_204_NO_CONTENT)
+        return Response(AdScheduleSerializer(schedule).data)
+
+
+@extend_schema(
+    parameters=[
+        OpenApiParameter("date", OpenApiTypes.DATE, description="YYYY-MM-DD, contractor's day to view", required=True, location=OpenApiParameter.QUERY)
+    ],
+    responses={200: AdScheduleSerializer(many=True)},
+    examples=[OpenApiExample("day schedule example", value=[{"id":1,"ad":42,"start_time":"2026-02-12T09:00:00Z","end_time":"2026-02-12T11:00:00Z","location":"123 Main St"}], response_only=True)]
+)
+class ContractorDayScheduleAPIView(APIView):
+    permission_classes = [IsAuthenticated, IsContractor]
+
+    def get(self, request):
+        # contractor can view their schedule for a day
+        if not getattr(request.user, "role", "") == "contractor" and not request.user.is_superuser:
+            return Response({"detail":"Only contractors can view their schedule."}, status=status.HTTP_403_FORBIDDEN)
+        date_str = request.query_params.get("date")
+        if not date_str:
+            return Response({"detail":"date query param required (YYYY-MM-DD)."}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            date = timezone.datetime.strptime(date_str, "%Y-%m-%d").date()
+        except Exception:
+            return Response({"detail":"Invalid date format. Use YYYY-MM-DD."}, status=status.HTTP_400_BAD_REQUEST)
+
+        start_dt = timezone.make_aware(timezone.datetime.combine(date, timezone.datetime.min.time()))
+        end_dt = timezone.make_aware(timezone.datetime.combine(date, timezone.datetime.max.time()))
+        qs = AdSchedule.objects.filter(contractor=request.user, start_time__gte=start_dt, start_time__lte=end_dt).order_by("start_time")
+        return Response(AdScheduleSerializer(qs, many=True).data)

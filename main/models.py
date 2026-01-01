@@ -245,3 +245,26 @@ class JobRequest(models.Model):
     def cancel(self):
         self.status = self.STATUS_CANCELLED
         self.save(update_fields=["status"])
+
+
+class AdSchedule(models.Model):
+    """
+    A schedule entry for an Ad assigned to a contractor.
+    We keep explicit start/end times to check for overlaps.
+    """
+    ad = models.OneToOneField('Ad', on_delete=models.CASCADE, related_name='schedule')
+    contractor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='schedules')
+    start_time = models.DateTimeField('start time')
+    end_time = models.DateTimeField('end time')
+    location = models.CharField('location', max_length=300, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['start_time']
+        verbose_name = "ad schedule"
+        verbose_name_plural = "ad schedules"
+
+    def __str__(self):
+        return f"Schedule for Ad {self.ad_id} by {self.contractor} @ {self.start_time.isoformat()}"

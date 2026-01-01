@@ -2,7 +2,7 @@
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
 from django.utils import timezone
-from .models import Ad, Review, Ticket, JobRequest
+from .models import Ad, Review, Ticket, JobRequest, AdSchedule
 
 
 User = get_user_model()
@@ -247,3 +247,43 @@ class ContractorListItemSerializer(serializers.ModelSerializer):
             "id", "first_name", "last_name", "email", "phone", "role",
             "completed_count", "average_rating", "total_reviews"
         ]
+
+
+class AdScheduleSerializer(serializers.ModelSerializer):
+    ad = serializers.PrimaryKeyRelatedField(queryset=Ad.objects.all())
+    contractor = serializers.PrimaryKeyRelatedField(read_only=True)
+
+    class Meta:
+        model = AdSchedule
+        fields = ["id", "ad", "contractor", "start_time", "end_time", "location", "created_at", "updated_at"]
+        read_only_fields = ["contractor", "created_at", "updated_at"]
+
+    def validate(self, data):
+        ad = data["ad"]
+        # contractor will be set from request
+        contractor = self.context["request"].user
+
+        # ad must have performer set to this contractor
+        if ad.performer is None or ad.performer.pk != contractor.pk:
+            raise serializers.ValidationError("Only the assigned performer can set schedule for this ad.")
+
+        start = data.get("start_time")
+        end = data.get("end_time")
+        if not start or not end:
+            raise serializers.ValidationError("start_time and end_time are required.")
+        if end <= start:
+            raise serializers.ValidationError("end_time must be after start_time.")
+
+        # check overlapping schedules for this contractor (exclude this ad's existing schedule if updating)
+        qs = AdSchedule.objects.filter(contractor=contractor).exclude(ad=ad)
+        overlap = qs.filter(start_time__lt=end, end_time__gt=start).exists()
+        if overlap:
+            raise serializers.ValidationError("Schedule overlaps with another assigned ad for this contractor.")
+
+        return data
+
+    def create(self, validated_data):
+        validated_data["contractor"] = self.context["request"].user
+        # if a schedule exists for this ad, update it (one-to-one)
+        schedule, created = AdSchedule.objects.update_or_create(ad=validated_data["ad"], defaults=validated_data)
+        return schedule
